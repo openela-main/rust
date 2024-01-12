@@ -1,2 +1,2 @@
-371af0fbe04051e20a74dbea6d4e4e548f10f15309c49cae2688afb882b6c7f1 SOURCES/rustc-1.71.1-src.tar.xz
-0a1c09c8c1da62a1ba214254ff4c9db6b60979c00f648a5eae33831d6ee2840e SOURCES/wasi-libc-wasi-sdk-20.tar.gz
+07ac4e6c93e0d8ecfaf3b86c4c78bbbde3f5be675f0334e7fb343cb4a0b81ebe SOURCES/rustc-1.66.1-src.tar.xz
+ba9e49ba3daa82f27d3ab1f65937e160a719bbe20b9c5d264448a42d6c47130a SOURCES/wasi-libc-wasi-sdk-17.tar.gz
