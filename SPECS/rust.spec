@@ -9,10 +9,10 @@
 ## END: Set by rpmautospec
 
 Name:           rust
-Version:        1.84.1
+Version:        1.88.0
 Release:        %autorelease
 Summary:        The Rust Programming Language
-License:        (Apache-2.0 OR MIT) AND (Artistic-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unicode-DFS-2016)
+License:        (Apache-2.0 OR MIT) AND (Artistic-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unicode-3.0)
 # ^ written as: (rust itself) and (bundled libraries)
 URL:            https://www.rust-lang.org
 
@@ -21,12 +21,12 @@ URL:            https://www.rust-lang.org
 %global rust_arches x86_64 i686 armv7hl aarch64 ppc64le s390x riscv64
 ExclusiveArch:  %{rust_arches}
 
-# To bootstrap from scratch, set the channel and date from src/stage0.json
-# e.g. 1.59.0 wants rustc: 1.58.0-2022-01-13
+# To bootstrap from scratch, set the channel and date from src/stage0
+# e.g. 1.88.0 wants rustc: 1.87.0-2025-05-15
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_version 1.83.0
-%global bootstrap_channel 1.83.0
-%global bootstrap_date 2024-11-28
+%global bootstrap_version 1.87.0
+%global bootstrap_channel 1.87.0
+%global bootstrap_date 2025-05-15
 
 # Only the specified arches will use bootstrap binaries.
 # NOTE: Those binaries used to be uploaded with every new release, but that was
@@ -38,7 +38,8 @@ ExclusiveArch:  %{rust_arches}
 # We need CRT files for *-wasi targets, at least as new as the commit in
 # src/ci/docker/host-x86_64/dist-various-2/build-wasi-toolchain.sh
 %global wasi_libc_url https://github.com/WebAssembly/wasi-libc
-%global wasi_libc_ref wasi-sdk-25
+#global wasi_libc_ref wasi-sdk-25
+%global wasi_libc_ref 640c0cfc19a96b099e0791824be5ef0105ce2084
 %global wasi_libc_name wasi-libc-%{wasi_libc_ref}
 %global wasi_libc_source %{wasi_libc_url}/archive/%{wasi_libc_ref}/%{wasi_libc_name}.tar.gz
 %global wasi_libc_dir %{_builddir}/%{wasi_libc_name}
@@ -52,18 +53,19 @@ ExclusiveArch:  %{rust_arches}
 %bcond_with llvm_static
 
 # We can also choose to just use Rust's bundled LLVM, in case the system LLVM
-# is insufficient.  Rust currently requires LLVM 18.0+.
-%global min_llvm_version 18.0.0
-%global bundled_llvm_version 19.1.5
-#global llvm_compat_version 17
+# is insufficient. Rust currently requires LLVM 19.0+.
+# See src/bootstrap/src/core/build_steps/llvm.rs, fn check_llvm_version
+%global min_llvm_version 19.0.0
+%global bundled_llvm_version 20.1.5
+#global llvm_compat_version 19
 %global llvm llvm%{?llvm_compat_version}
 %bcond_with bundled_llvm
 
-# Requires stable libgit2 1.8, and not the next minor soname change.
+# Requires stable libgit2 1.9, and not the next minor soname change.
 # This needs to be consistent with the bindings in vendor/libgit2-sys.
-%global min_libgit2_version 1.8.1
-%global next_libgit2_version 1.9.0~
-%global bundled_libgit2_version 1.8.1
+%global min_libgit2_version 1.9.0
+%global next_libgit2_version 1.10.0~
+%global bundled_libgit2_version 1.9.0
 %if 0%{?fedora} >= 41
 %bcond_with bundled_libgit2
 %else
@@ -81,7 +83,7 @@ ExclusiveArch:  %{rust_arches}
 
 # Cargo uses UPSERTs with omitted conflict targets
 %global min_sqlite3_version 3.35
-%global bundled_sqlite3_version 3.46.0
+%global bundled_sqlite3_version 3.49.1
 %if 0%{?rhel} && 0%{?rhel} < 10
 %bcond_without bundled_sqlite3
 %else
@@ -122,7 +124,7 @@ ExclusiveArch:  %{rust_arches}
 # Detect non-stable channels from the version, like 1.74.0~beta.1
 %{lua: do
   local version = rpm.expand("%{version}")
-  local version_channel, subs = string.gsub(version, "^.*~(%w+).*$", "%1", 1)
+  local version_channel, subs = version:gsub("^.*~(%w+).*$", "%1", 1)
   rpm.define("channel " .. (subs ~= 0 and version_channel or "stable"))
   rpm.define("rustc_package rustc-" .. version_channel .. "-src")
 end}
@@ -147,10 +149,11 @@ Patch4:         0001-bootstrap-allow-disabling-target-self-contained.patch
 Patch5:         0002-set-an-external-library-path-for-wasm32-wasi.patch
 
 # We don't want to use the bundled library in libsqlite3-sys
-Patch6:         rustc-1.84.0-unbundle-sqlite.patch
+Patch6:         rustc-1.88.0-unbundle-sqlite.patch
 
-# https://github.com/rust-lang/cc-rs/issues/1354
-Patch7:         0001-Only-translate-profile-flags-for-Clang.patch
+# Ensure stack in two places that affect s390x
+# https://github.com/rust-lang/rust/pull/142047
+Patch7:         rust-pr142047.patch
 
 ### RHEL-specific patches below ###
 
@@ -161,7 +164,7 @@ Source102:      cargo_vendor.attr
 Source103:      cargo_vendor.prov
 
 # Disable cargo->libgit2->libssh2 on RHEL, as it's not approved for FIPS (rhbz1732949)
-Patch100:       rustc-1.84.0-disable-libssh2.patch
+Patch100:       rustc-1.88.0-disable-libssh2.patch
 
 # Get the Rust triple for any architecture and ABI.
 %{lua: function rust_triple(arch, abi)
@@ -212,7 +215,7 @@ end}
 %endif
 %global all_targets %{?mingw_targets} %{?wasm_targets} %{?extra_targets}
 %define target_enabled() %{lua:
-  print(string.find(rpm.expand(" %{all_targets} "), rpm.expand(" %1 "), 1, true) or 0)
+  print(rpm.expand(" %{all_targets} "):find(rpm.expand(" %1 "), 1, true) or 0)
 }
 
 %if %defined bootstrap_arches
@@ -220,7 +223,7 @@ end}
 # Also define bootstrap_source just for the current target.
 %{lua: do
   local bootstrap_arches = {}
-  for arch in string.gmatch(rpm.expand("%{bootstrap_arches}"), "%S+") do
+  for arch in rpm.expand("%{bootstrap_arches}"):gmatch("%S+") do
     table.insert(bootstrap_arches, arch)
   end
   local base = rpm.expand("https://static.rust-lang.org/dist/%{bootstrap_date}")
@@ -293,6 +296,7 @@ Provides:       bundled(llvm) = %{bundled_llvm_version}
 BuildRequires:  cmake >= 3.5.1
 %if %defined llvm_compat_version
 %global llvm_root %{_libdir}/%{llvm}
+%global llvm_path %{llvm_root}/bin
 %else
 %global llvm_root %{_prefix}
 %endif
@@ -309,18 +313,12 @@ BuildRequires:  procps-ng
 # debuginfo-gdb tests need gdb
 BuildRequires:  gdb
 # Work around https://bugzilla.redhat.com/show_bug.cgi?id=2275274:
-# gdb currently prints a "Unable to load 'rpm' module.  Please install the python3-rpm package."
+# gdb currently prints a "Unable to load 'rpm' module. Please install the python3-rpm package."
 # message that breaks version detection.
 BuildRequires:  python3-rpm
 
 # For src/test/run-make/static-pie
 BuildRequires:  glibc-static
-
-# For tests/run-make/pgo-branch-weights
-# riscv64 does not support binutils-gold yet
-%ifnarch riscv64
-BuildRequires:  binutils-gold
-%endif
 
 # Virtual provides for folks who attempt "dnf install rustc"
 Provides:       rustc = %{version}-%{release}
@@ -329,7 +327,7 @@ Provides:       rustc%{?_isa} = %{version}-%{release}
 # Always require our exact standard library
 Requires:       %{name}-std-static%{?_isa} = %{version}-%{release}
 
-# The C compiler is needed at runtime just for linking.  Someday rustc might
+# The C compiler is needed at runtime just for linking. Someday rustc might
 # invoke the linker directly, and then we'll only need binutils.
 # https://github.com/rust-lang/rust/issues/11937
 Requires:       /usr/bin/cc
@@ -356,12 +354,6 @@ Requires:       /usr/bin/cc
 %global __brp_strip_static_archive %{nil}
 %global __brp_strip_lto %{nil}
 
-%if %{without bundled_llvm}
-%if "%{llvm_root}" == "%{_prefix}" || 0%{?scl:1}
-%global llvm_has_filecheck 1
-%endif
-%endif
-
 # We're going to override --libdir when configuring to get rustlib into a
 # common path, but we'll fix the shared libraries during install.
 %global common_libdir %{_prefix}/lib
@@ -380,11 +372,11 @@ BuildRequires:  mingw64-winpthreads-static
 
 %if %defined wasm_targets
 %if %with bundled_wasi_libc
-BuildRequires:  clang
+BuildRequires:  clang%{?llvm_compat_version}
 %else
 BuildRequires:  wasi-libc-static
 %endif
-BuildRequires:  lld
+BuildRequires:  lld%{?llvm_compat_version}
 %endif
 
 # For profiler_builtins
@@ -393,6 +385,29 @@ BuildRequires:  compiler-rt%{?llvm_compat_version}
 # This component was removed as of Rust 1.69.0.
 # https://github.com/rust-lang/rust/pull/101841
 Obsoletes:      %{name}-analysis < 1.69.0~
+
+# Experimenting with a fine-grained version of %%cargo_vendor_manifest,
+# so we can have different bundled provides for each tool subpackage.
+%define cargo_tree_manifest(n:m:f:t:) (       \
+  %{!-n:%{error:must specify a tool name}}    \
+  set -euo pipefail                           \
+  mkdir -p build/manifests/%{-n*}             \
+  %{shrink:                                   \
+    env RUSTC_BOOTSTRAP=1                     \
+      %{local_rust_root}/bin/cargo tree       \
+      --offline --edges normal,build          \
+      --prefix none --format "{p}"            \
+      %{-m:--manifest-path %{-m*}/Cargo.toml} \
+      %{-f:--features %{-f*}}                 \
+      %{-t:--target %{-t*}}                   \
+      %*                                      \
+    | sed '/([*/]/d; s/ (proc-macro)$//'      \
+    | sort -u                                 \
+    >build/manifests/%{-n*}/cargo-vendor.txt  \
+  }                                           \
+)
+%{?fedora:BuildRequires: cargo-rpm-macros}
+%{?rhel:BuildRequires: rust-toolset}
 
 %description
 Rust is a systems programming language that runs blazingly fast, prevents
@@ -548,10 +563,11 @@ Provides:       bundled(sqlite) = %{bundled_sqlite3_version}
 %endif
 # For tests:
 BuildRequires:  git-core
-# Cargo is not much use without Rust
-Requires:       %{name}
+# Cargo is not much use without Rust, and it's worth keeping the versions
+# in sync since some feature development depends on them together.
+Requires:       %{name} = %{version}-%{release}
 
-# "cargo vendor" is a builtin command starting with 1.37.  The Obsoletes and
+# "cargo vendor" is a builtin command starting with 1.37. The Obsoletes and
 # Provides are mostly relevant to RHEL, but harmless to have on Fedora/etc. too
 Obsoletes:      cargo-vendor <= 0.1.23
 Provides:       cargo-vendor = %{version}-%{release}
@@ -617,7 +633,7 @@ BuildArch:      noarch
 Recommends:     %{name}-std-static = %{version}-%{release}
 
 %description src
-This package includes source files for the Rust standard library.  It may be
+This package includes source files for the Rust standard library. It may be
 useful as a reference for code completion tools in various editors.
 
 
@@ -681,7 +697,7 @@ rm -rf %{wasi_libc_dir}/dlmalloc/
 %if %without bundled_sqlite3
 %patch -P6 -p1
 %endif
-%patch -P7 -p1 -d vendor/cc-1.2.5
+%patch -P7 -p1
 
 %if %with disabled_libssh2
 %patch -P100 -p1
@@ -701,7 +717,7 @@ mkdir -p src/llvm-project/libunwind/
 # Remove submodules we don't need.
 rm -rf src/gcc
 rm -rf src/tools/enzyme
-rm -rf src/tools/rustc-perf
+rm -rf src/tools/rustc-perf/collector/*-benchmarks/
 
 # Remove other unused vendored libraries. This leaves the directory in place,
 # because some build scripts watch them, e.g. "cargo:rerun-if-changed=curl".
@@ -743,7 +759,7 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
 %endif
 
 # The configure macro will modify some autoconf-related files, which upsets
-# cargo when it tries to verify checksums in those files.  If we just truncate
+# cargo when it tries to verify checksums in those files. If we just truncate
 # that file list, cargo won't have anything to complain about.
 find vendor -name .cargo-checksum.json \
   -exec sed -i.uncheck -e 's/"files":{[^}]*}/"files":{ }/' '{}' '+'
@@ -779,6 +795,7 @@ end}
   %{!?with_bundled_oniguruma:RUSTONIG_SYSTEM_LIBONIG=1}
   %{!?with_bundled_sqlite3:LIBSQLITE3_SYS_USE_PKG_CONFIG=1}
   %{!?with_disabled_libssh2:LIBSSH2_SYS_USE_PKG_CONFIG=1}
+  %{?llvm_path:PATH="%{llvm_path}:$PATH"}
 }
 %global export_rust_env export %{rust_env}
 
@@ -787,7 +804,7 @@ end}
 
 # Some builders have relatively little memory for their CPU count.
 # At least 4GB per CPU is a good rule of thumb for building rustc.
-%if ! %defined constrain_build
+%if %undefined constrain_build
 %define constrain_build(m:) %{lua:
   for l in io.lines('/proc/meminfo') do
     if l:sub(1, 9) == "MemTotal:" then
@@ -835,12 +852,8 @@ end}
 %endif
 
 # Find the compiler-rt library for the Rust profiler_builtins crate.
-%if %defined llvm_compat_version
-# clang_resource_dir is not defined for compat builds.
-%define profiler /usr/lib/clang/%{llvm_compat_version}/lib/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
-%else
-%define profiler %{clang_resource_dir}/lib/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
-%endif
+%define clang_lib %{expand:%%clang%{?llvm_compat_version}_resource_dir}/lib
+%define profiler %{clang_lib}/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
 test -r "%{profiler}"
 
 %configure --disable-option-checking \
@@ -859,7 +872,6 @@ test -r "%{profiler}"
   --local-rust-root=%{local_rust_root} \
   --set build.rustfmt=/bin/true \
   %{!?with_bundled_llvm: --llvm-root=%{llvm_root} \
-    %{!?llvm_has_filecheck: --disable-codegen-tests} \
     %{!?with_llvm_static: --enable-llvm-link-shared } } \
   --disable-llvm-static-stdcpp \
   --disable-llvm-bitcode-linker \
@@ -875,7 +887,7 @@ test -r "%{profiler}"
   --set build.optimized-compiler-builtins=false \
   --set rust.llvm-tools=false \
   --enable-extended \
-  --tools=cargo,clippy,rls,rust-analyzer,rustfmt,src \
+  --tools=cargo,clippy,rust-analyzer,rustfmt,src \
   --enable-vendor \
   --enable-verbose-tests \
   --release-channel=%{channel} \
@@ -883,17 +895,25 @@ test -r "%{profiler}"
 
 %global __x %{__python3} ./x.py
 
-%if %with rustc_pgo
+# - rustc is exibiting signs of miscompilation on pwr9+pgo (root cause TBD),
+#   so we're skipping pgo on rhel ppc64le for now. See RHEL-88598 for more.
+# - Since 1.87, Fedora started getting ppc64le segfaults, and this also seems
+#   to be avoidable by skipping pgo. See bz2367960 for examples of that.
+%if %{with rustc_pgo} && !( "%{_target_cpu}" == "ppc64le" )
 # Build the compiler with profile instrumentation
 %define profraw $PWD/build/profiles
 %define profdata $PWD/build/rustc.profdata
 mkdir -p "%{profraw}"
 %{__x} build sysroot --rust-profile-generate="%{profraw}"
 # Build cargo as a workload to generate compiler profiles
+# We normally use `x.py`, but in this case we invoke the stage 2 compiler and libs
+# directly to ensure we use the instrumented compiler.
 env LLVM_PROFILE_FILE="%{profraw}/default_%%m_%%p.profraw" \
-  %{__x} --keep-stage=0 --keep-stage=1 build cargo
+  LD_LIBRARY_PATH=$PWD/build/host/stage2/lib \
+  RUSTC=$PWD/build/host/stage2/bin/rustc \
+  cargo build --manifest-path=src/tools/cargo/Cargo.toml
 # Finalize the profile data and clean up the raw files
-%{llvm_root}/bin/llvm-profdata merge -o "%{profdata}" "%{profraw}"
+llvm-profdata merge -o "%{profdata}" "%{profraw}"
 rm -r "%{profraw}" build/%{rust_triple}/stage2*/
 # Redefine the macro to use that profile data from now on
 %global __x %{__x} --rust-profile-use="%{profdata}"
@@ -910,6 +930,21 @@ for triple in %{?all_targets} ; do
   %{__x} build --target=$triple std
 done
 
+# Collect cargo-vendor.txt for each tool and std
+%{cargo_tree_manifest -n rustc -- -p rustc-main -p rustdoc}
+%{cargo_tree_manifest -n cargo -m src/tools/cargo}
+%{cargo_tree_manifest -n clippy -m src/tools/clippy}
+%{cargo_tree_manifest -n rust-analyzer -m src/tools/rust-analyzer}
+%{cargo_tree_manifest -n rustfmt -m src/tools/rustfmt}
+
+%{cargo_tree_manifest -n std -m library -f backtrace}
+for triple in %{?all_targets} ; do
+  case $triple in
+    *-none*) %{cargo_tree_manifest -n std-$triple -m library/alloc -t $triple} ;;
+    *) %{cargo_tree_manifest -n std-$triple -m library -f backtrace -t $triple} ;;
+  esac
+done
+
 %install
 %if 0%{?rhel} && 0%{?rhel} <= 9
 %{?set_build_flags}
@@ -921,9 +956,6 @@ DESTDIR=%{buildroot} %{__x} install
 for triple in %{?all_targets} ; do
   DESTDIR=%{buildroot} %{__x} install --target=$triple std
 done
-
-# The rls stub doesn't have an install target, but we can just copy it.
-%{__install} -t %{buildroot}%{_bindir} build/%{rust_triple}/stage2-tools-bin/rls
 
 # These are transient files used by x.py dist and install
 rm -rf ./build/dist/ ./build/tmp/
@@ -1042,7 +1074,6 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 
 %{__x} test --no-fail-fast rustfmt || :
 
-
 %ldconfig_scriptlets
 
 
@@ -1055,6 +1086,9 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %{_libexecdir}/rust-analyzer-proc-macro-srv
 %{_mandir}/man1/rustc.1*
 %{_mandir}/man1/rustdoc.1*
+%license build/manifests/rustc/cargo-vendor.txt
+%license %{_pkgdocdir}/COPYRIGHT.html
+%license %{_pkgdocdir}/licenses/
 
 
 %files std-static
@@ -1063,13 +1097,16 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %dir %{rustlibdir}/%{rust_triple}/lib
 %{rustlibdir}/%{rust_triple}/lib/*.rlib
 %{rustlibdir}/%{rust_triple}/lib/*.so
+%license build/manifests/std/cargo-vendor.txt
+%license %{_pkgdocdir}/COPYRIGHT-library.html
 
 %global target_files()      \
 %files std-static-%1        \
 %dir %{rustlibdir}          \
 %dir %{rustlibdir}/%1       \
 %dir %{rustlibdir}/%1/lib   \
-%{rustlibdir}/%1/lib/*.rlib
+%{rustlibdir}/%1/lib/*.rlib \
+%license build/manifests/std-%1/cargo-vendor.txt
 
 %if %target_enabled i686-pc-windows-gnu
 %target_files i686-pc-windows-gnu
@@ -1151,6 +1188,7 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %{_datadir}/zsh/site-functions/_cargo
 %dir %{_datadir}/cargo
 %dir %{_datadir}/cargo/registry
+%license build/manifests/cargo/cargo-vendor.txt
 
 
 %files -n rustfmt
@@ -1158,13 +1196,14 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %{_bindir}/cargo-fmt
 %doc src/tools/rustfmt/{README,CHANGELOG,Configurations}.md
 %license src/tools/rustfmt/LICENSE-{APACHE,MIT}
+%license build/manifests/rustfmt/cargo-vendor.txt
 
 
 %files analyzer
-%{_bindir}/rls
 %{_bindir}/rust-analyzer
 %doc src/tools/rust-analyzer/README.md
 %license src/tools/rust-analyzer/LICENSE-{APACHE,MIT}
+%license build/manifests/rust-analyzer/cargo-vendor.txt
 
 
 %files -n clippy
@@ -1172,6 +1211,7 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %{_bindir}/clippy-driver
 %doc src/tools/clippy/{README.md,CHANGELOG.md}
 %license src/tools/clippy/LICENSE-{APACHE,MIT}
+%license build/manifests/clippy/cargo-vendor.txt
 
 
 %files src
@@ -1192,6 +1232,24 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 
 %changelog
 ## START: Generated by rpmautospec
+* Fri Jul 11 2025 Josh Stone <jistone@redhat.com> - 1.88.0-1
+- Update to Rust 1.88.0
+
+* Thu May 29 2025 Josh Stone <jistone@redhat.com> - 1.87.0-1
+- Update to Rust 1.87.0
+
+* Thu Apr 24 2025 Josh Stone <jistone@redhat.com> - 1.86.0-2
+- Temporarily skip PGO on RHEL ppc64le
+
+* Tue Apr 08 2025 Josh Stone <jistone@redhat.com> - 1.86.0-1
+- Update to Rust 1.86.0
+
+* Tue Mar 04 2025 Josh Stone <jistone@redhat.com> - 1.85.0-2
+- Temporarily skip PGO on s390x
+
+* Tue Mar 04 2025 Josh Stone <jistone@redhat.com> - 1.85.0-1
+- Update to Rust 1.85.0
+
 * Tue Feb 04 2025 Josh Stone <jistone@redhat.com> - 1.84.1-1
 - Update to Rust 1.84.1
 

@@ -1,2 +1,2 @@
-SOURCES/rustc-1.84.1-src.tar.xz
-SOURCES/wasi-libc-wasi-sdk-25.tar.gz
+SOURCES/wasi-libc-640c0cfc19a96b099e0791824be5ef0105ce2084.tar.gz
+SOURCES/rustc-1.88.0-src.tar.xz
