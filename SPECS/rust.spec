@@ -1,5 +1,5 @@
 Name:           rust
-Version:        1.88.0
+Version:        1.92.0
 Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (Apache-2.0 OR MIT) AND (Artistic-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unicode-3.0)
@@ -12,11 +12,11 @@ URL:            https://www.rust-lang.org
 ExclusiveArch:  %{rust_arches}
 
 # To bootstrap from scratch, set the channel and date from src/stage0
-# e.g. 1.88.0 wants rustc: 1.87.0-2025-05-15
+# e.g. 1.89.0 wants rustc: 1.88.0-2025-06-26
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_version 1.87.0
-%global bootstrap_channel 1.87.0
-%global bootstrap_date 2025-05-15
+%global bootstrap_version 1.91.0
+%global bootstrap_channel 1.91.0
+%global bootstrap_date 2025-10-30
 
 # Only the specified arches will use bootstrap binaries.
 # NOTE: Those binaries used to be uploaded with every new release, but that was
@@ -28,8 +28,7 @@ ExclusiveArch:  %{rust_arches}
 # We need CRT files for *-wasi targets, at least as new as the commit in
 # src/ci/docker/host-x86_64/dist-various-2/build-wasi-toolchain.sh
 %global wasi_libc_url https://github.com/WebAssembly/wasi-libc
-#global wasi_libc_ref wasi-sdk-25
-%global wasi_libc_ref 640c0cfc19a96b099e0791824be5ef0105ce2084
+%global wasi_libc_ref wasi-sdk-27
 %global wasi_libc_name wasi-libc-%{wasi_libc_ref}
 %global wasi_libc_source %{wasi_libc_url}/archive/%{wasi_libc_ref}/%{wasi_libc_name}.tar.gz
 %global wasi_libc_dir %{_builddir}/%{wasi_libc_name}
@@ -45,8 +44,8 @@ ExclusiveArch:  %{rust_arches}
 # We can also choose to just use Rust's bundled LLVM, in case the system LLVM
 # is insufficient. Rust currently requires LLVM 19.0+.
 # See src/bootstrap/src/core/build_steps/llvm.rs, fn check_llvm_version
-%global min_llvm_version 19.0.0
-%global bundled_llvm_version 20.1.5
+%global min_llvm_version 20.0.0
+%global bundled_llvm_version 21.1.3
 #global llvm_compat_version 19
 %global llvm llvm%{?llvm_compat_version}
 %bcond_with bundled_llvm
@@ -55,7 +54,7 @@ ExclusiveArch:  %{rust_arches}
 # This needs to be consistent with the bindings in vendor/libgit2-sys.
 %global min_libgit2_version 1.9.0
 %global next_libgit2_version 1.10.0~
-%global bundled_libgit2_version 1.9.0
+%global bundled_libgit2_version 1.9.1
 %if 0%{?fedora} >= 41
 %bcond_with bundled_libgit2
 %else
@@ -63,7 +62,7 @@ ExclusiveArch:  %{rust_arches}
 %endif
 
 # Try to use system oniguruma (only used at build time for rust-docs)
-# src/tools/rustbook -> ... -> onig_sys v69.8.1 needs at least 6.9.3
+# src/tools/rustbook -> ... -> onig_sys v69.9.1 needs at least 6.9.3
 %global min_oniguruma_version 6.9.3
 %if 0%{?rhel} && 0%{?rhel} < 9
 %bcond_without bundled_oniguruma
@@ -73,7 +72,7 @@ ExclusiveArch:  %{rust_arches}
 
 # Cargo uses UPSERTs with omitted conflict targets
 %global min_sqlite3_version 3.35
-%global bundled_sqlite3_version 3.49.1
+%global bundled_sqlite3_version 3.50.2
 %if 0%{?rhel} && 0%{?rhel} < 10
 %bcond_without bundled_sqlite3
 %else
@@ -139,11 +138,10 @@ Patch4:         0001-bootstrap-allow-disabling-target-self-contained.patch
 Patch5:         0002-set-an-external-library-path-for-wasm32-wasi.patch
 
 # We don't want to use the bundled library in libsqlite3-sys
-Patch6:         rustc-1.88.0-unbundle-sqlite.patch
+Patch6:         rustc-1.92.0-unbundle-sqlite.patch
 
-# Ensure stack in two places that affect s390x
-# https://github.com/rust-lang/rust/pull/142047
-Patch7:         rust-pr142047.patch
+# stage0 tries to copy all of /usr/lib, sometimes unsuccessfully, see #143735
+Patch7:         0001-only-copy-rustlib-into-stage0-sysroot.patch
 
 ### RHEL-specific patches below ###
 
@@ -153,7 +151,7 @@ Source101:      cargo_vendor.attr
 Source102:      cargo_vendor.prov
 
 # Disable cargo->libgit2->libssh2 on RHEL, as it's not approved for FIPS (rhbz1732949)
-Patch100:       rustc-1.88.0-disable-libssh2.patch
+Patch100:       rustc-1.92.0-disable-libssh2.patch
 
 # Get the Rust triple for any architecture and ABI.
 %{lua: function rust_triple(arch, abi)
@@ -296,6 +294,7 @@ BuildRequires:  %{llvm}-devel >= %{min_llvm_version}
 %if %with llvm_static
 BuildRequires:  %{llvm}-static
 BuildRequires:  libffi-devel
+BuildRequires:  libxml2-devel
 %endif
 %endif
 
@@ -382,6 +381,7 @@ Obsoletes:      %{name}-analysis < 1.69.0~
   mkdir -p build/manifests/%{-n*}             \
   %{shrink:                                   \
     env RUSTC_BOOTSTRAP=1                     \
+      RUSTC=%{local_rust_root}/bin/rustc      \
       %{local_rust_root}/bin/cargo tree       \
       --offline --edges normal,build          \
       --prefix none --format "{p}"            \
@@ -394,8 +394,10 @@ Obsoletes:      %{name}-analysis < 1.69.0~
     >build/manifests/%{-n*}/cargo-vendor.txt  \
   }                                           \
 )
+%ifnarch %{bootstrap_arches}
 %{?fedora:BuildRequires: cargo-rpm-macros}
 %{?rhel:BuildRequires: rust-toolset}
+%endif
 
 %description
 Rust is a systems programming language that runs blazingly fast, prevents
@@ -505,6 +507,8 @@ Summary:        GDB pretty printers for Rust
 BuildArch:      noarch
 Requires:       gdb
 Requires:       %{name}-debugger-common = %{version}-%{release}
+# rust-gdb uses rustc to find the sysroot
+Requires:       %{name} = %{version}-%{release}
 
 %description gdb
 This package includes the rust-gdb script, which allows easier debugging of Rust
@@ -517,6 +521,8 @@ BuildArch:      noarch
 Requires:       lldb
 Requires:       python3.12-lldb
 Requires:       %{name}-debugger-common = %{version}-%{release}
+# rust-lldb uses rustc to find the sysroot
+Requires:       %{name} = %{version}-%{release}
 
 %description lldb
 This package includes the rust-lldb script, which allows easier debugging of Rust
@@ -728,7 +734,7 @@ sed -i.lzma -e '/LZMA_API_STATIC/d' src/bootstrap/src/core/build_steps/tool.rs
 %if %{without bundled_llvm} && %{with llvm_static}
 # Static linking to distro LLVM needs to add -lffi
 # https://github.com/rust-lang/rust/issues/34486
-sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
+sed -i.ffi -e '$a #[link(name = "ffi")] extern "C" {}' \
   compiler/rustc_llvm/src/lib.rs
 %endif
 
@@ -825,10 +831,19 @@ end}
 %endif
 %endif
 
-# Find the compiler-rt library for the Rust profiler_builtins crate.
+# Find the compiler-rt library for the Rust profiler_builtins and optimized-builtins crates.
 %define clang_lib %{expand:%%clang%{?llvm_compat_version}_resource_dir}/lib
 %define profiler %{clang_lib}/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
 test -r "%{profiler}"
+
+# llvm < 21 does not provide a builtins library for s390x.
+%if "%{_arch}" != "s390x" || 0%{?clang_major_version} >= 21
+%define optimized_builtins %{clang_lib}/%{_arch}-redhat-linux-gnu/libclang_rt.builtins.a
+test -r "%{optimized_builtins}"
+%else
+%define optimized_builtins false
+%endif
+
 
 %configure --disable-option-checking \
   --docdir=%{_pkgdocdir} \
@@ -840,6 +855,7 @@ test -r "%{profiler}"
   --set target.%{rust_triple}.ar=%{__ar} \
   --set target.%{rust_triple}.ranlib=%{__ranlib} \
   --set target.%{rust_triple}.profiler="%{profiler}" \
+  --set target.%{rust_triple}.optimized-compiler-builtins="%{optimized_builtins}" \
   %{?mingw_target_config} \
   %{?wasm_target_config} \
   --python=%{__python3} \
@@ -860,8 +876,9 @@ test -r "%{profiler}"
   --set build.test-stage=2 \
   --set build.optimized-compiler-builtins=false \
   --set rust.llvm-tools=false \
+  --set rust.verify-llvm-ir=true \
   --enable-extended \
-  --tools=cargo,clippy,rust-analyzer,rustfmt,src \
+  --tools=cargo,clippy,rust-analyzer,rustdoc,rustfmt,src \
   --enable-vendor \
   --enable-verbose-tests \
   --release-channel=%{channel} \
@@ -869,11 +886,7 @@ test -r "%{profiler}"
 
 %global __x %{__python3} ./x.py
 
-# - rustc is exibiting signs of miscompilation on pwr9+pgo (root cause TBD),
-#   so we're skipping pgo on rhel ppc64le for now. See RHEL-88598 for more.
-# - Since 1.87, Fedora started getting ppc64le segfaults, and this also seems
-#   to be avoidable by skipping pgo. See bz2367960 for examples of that.
-%if %{with rustc_pgo} && !( "%{_target_cpu}" == "ppc64le" )
+%if %{with rustc_pgo}
 # Build the compiler with profile instrumentation
 %define profraw $PWD/build/profiles
 %define profdata $PWD/build/rustc.profdata
@@ -1034,9 +1047,29 @@ rm -rf "$TMP_HELLO"
 timeout -v 90m %{__x} test --no-fail-fast --skip={src/bootstrap,tests/crashes} || :
 rm -rf "./build/%{rust_triple}/test/"
 
+# Cargo tests skip list
+# Every test skipped here must have a documented reason to be skipped.
+# Duplicates are safe to add.
+
+# This test relies on the DNS to fail to resolve the host. DNS is not enabled
+# in mock in koji so the DNS resolution doesn't take place to begin with.
+# We test this after packaging
+%global cargo_test_skip_list net_err_suggests_fetch_with_cli
+
 %ifarch aarch64
 # https://github.com/rust-lang/rust/issues/123733
-%define cargo_test_skip --test-args "--skip panic_abort_doc_tests"
+%global cargo_test_skip_list %{cargo_test_skip_list} panic_abort_doc_tests
+%endif
+%if %with disabled_libssh2
+# These tests need ssh - guaranteed to fail when libssh2 is disabled.
+%global cargo_test_skip_list %{shrink:
+  %{cargo_test_skip_list}
+  net_err_suggests_fetch_with_cli
+  ssh_something_happens
+}
+%endif
+%if "%{cargo_test_skip_list}" != ""
+%define cargo_test_skip --test-args "%(printf -- '--skip %%s ' %{cargo_test_skip_list})"
 %endif
 timeout -v 30m %{__x} test --no-fail-fast cargo %{?cargo_test_skip} || :
 rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
@@ -1062,6 +1095,7 @@ timeout -v 30m %{__x} test --no-fail-fast rustfmt || :
 %license build/manifests/rustc/cargo-vendor.txt
 %license %{_pkgdocdir}/COPYRIGHT.html
 %license %{_pkgdocdir}/licenses/
+%exclude %{_sysconfdir}/target-spec-json-schema.json
 
 
 %files std-static
@@ -1201,6 +1235,18 @@ timeout -v 30m %{__x} test --no-fail-fast rustfmt || :
 
 
 %changelog
+* Wed Jan 07 2026 Josh Stone <jistone@redhat.com> - 1.92.0-1
+- Update to 1.92.0
+
+* Fri Nov 07 2025 Josh Stone <jistone@redhat.com> - 1.91.0-1
+- Update to 1.91.0
+
+* Fri Nov 07 2025 Josh Stone <jistone@redhat.com> - 1.90.0-1
+- Update to 1.90.0
+
+* Thu Nov 06 2025 Josh Stone <jistone@redhat.com> - 1.89.0-1
+- Update to 1.89.0
+
 * Fri Jul 11 2025 Josh Stone <jistone@redhat.com> - 1.88.0-1
 - Update to 1.88.0
 
