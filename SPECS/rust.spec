@@ -2,14 +2,14 @@
 ## (rpmautospec version 0.8.4)
 ## RPMAUTOSPEC: autorelease, autochangelog
 %define autorelease(e:s:pb:n) %{?-p:0.}%{lua:
-    release_number = 2;
+    release_number = 5;
     base_release_number = tonumber(rpm.expand("%{?-b*}%{!?-b:1}"));
     print(release_number + base_release_number - 1);
 }%{?-e:.%{-e*}}%{?-s:.%{-s*}}%{!?-n:%{?dist}}
 ## END: Set by rpmautospec
 
 Name:           rust
-Version:        1.92.0
+Version:        1.97.1
 Release:        %autorelease
 Summary:        The Rust Programming Language
 License:        (Apache-2.0 OR MIT) AND (Artistic-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unicode-3.0)
@@ -24,9 +24,9 @@ ExclusiveArch:  %{rust_arches}
 # To bootstrap from scratch, set the channel and date from src/stage0
 # e.g. 1.89.0 wants rustc: 1.88.0-2025-06-26
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_version 1.91.0
-%global bootstrap_channel 1.91.0
-%global bootstrap_date 2025-10-30
+%global bootstrap_version 1.96.0
+%global bootstrap_channel 1.96.0
+%global bootstrap_date 2026-05-28
 
 # Only the specified arches will use bootstrap binaries.
 # NOTE: Those binaries used to be uploaded with every new release, but that was
@@ -38,7 +38,7 @@ ExclusiveArch:  %{rust_arches}
 # We need CRT files for *-wasi targets, at least as new as the commit in
 # src/ci/docker/host-x86_64/dist-various-2/build-wasi-toolchain.sh
 %global wasi_libc_url https://github.com/WebAssembly/wasi-libc
-%global wasi_libc_ref wasi-sdk-27
+%global wasi_libc_ref wasi-sdk-32
 %global wasi_libc_name wasi-libc-%{wasi_libc_ref}
 %global wasi_libc_source %{wasi_libc_url}/archive/%{wasi_libc_ref}/%{wasi_libc_name}.tar.gz
 %global wasi_libc_dir %{_builddir}/%{wasi_libc_name}
@@ -52,37 +52,29 @@ ExclusiveArch:  %{rust_arches}
 %bcond_with llvm_static
 
 # We can also choose to just use Rust's bundled LLVM, in case the system LLVM
-# is insufficient. Rust currently requires LLVM 19.0+.
+# is insufficient. Rust currently requires LLVM 21.0+.
 # See src/bootstrap/src/core/build_steps/llvm.rs, fn check_llvm_version
-%global min_llvm_version 20.0.0
-%global bundled_llvm_version 21.1.3
-#global llvm_compat_version 19
+# See src/llvm-project/cmake/Modules/LLVMVersion.cmake for bundled version.
+%global min_llvm_version 21.0.0
+%global bundled_llvm_version 22.1.6
+#global llvm_compat_version 21
 %global llvm llvm%{?llvm_compat_version}
 %bcond_with bundled_llvm
 
 # Requires stable libgit2 1.9, and not the next minor soname change.
 # This needs to be consistent with the bindings in vendor/libgit2-sys.
-%global min_libgit2_version 1.9.0
+%global min_libgit2_version 1.9.2
 %global next_libgit2_version 1.10.0~
-%global bundled_libgit2_version 1.9.1
+%global bundled_libgit2_version 1.9.2
 %if 0%{?fedora} >= 41
 %bcond_with bundled_libgit2
 %else
 %bcond_without bundled_libgit2
 %endif
 
-# Try to use system oniguruma (only used at build time for rust-docs)
-# src/tools/rustbook -> ... -> onig_sys v69.9.1 needs at least 6.9.3
-%global min_oniguruma_version 6.9.3
-%if 0%{?rhel} && 0%{?rhel} < 9
-%bcond_without bundled_oniguruma
-%else
-%bcond_with bundled_oniguruma
-%endif
-
 # Cargo uses UPSERTs with omitted conflict targets
 %global min_sqlite3_version 3.35
-%global bundled_sqlite3_version 3.50.2
+%global bundled_sqlite3_version 3.51.3
 %if 0%{?rhel} && 0%{?rhel} < 10
 %bcond_without bundled_sqlite3
 %else
@@ -128,7 +120,11 @@ ExclusiveArch:  %{rust_arches}
   rpm.define("rustc_package rustc-" .. version_channel .. "-src")
 end}
 Source0:        https://static.rust-lang.org/dist/%{rustc_package}.tar.xz
-Source1:        %{wasi_libc_source}
+Source1:        https://static.rust-lang.org/dist/%{rustc_package}.tar.xz.asc
+Source2:        https://static.rust-lang.org/rust-key.gpg.ascii
+
+Source10:        %{wasi_libc_source}
+
 # Sources for bootstrap_arches are inserted by lua below
 
 # By default, rust tries to use "rust-lld" as a linker for some targets.
@@ -148,10 +144,14 @@ Patch4:         0001-bootstrap-allow-disabling-target-self-contained.patch
 Patch5:         0002-set-an-external-library-path-for-wasm32-wasi.patch
 
 # We don't want to use the bundled library in libsqlite3-sys
-Patch6:         rustc-1.92.0-unbundle-sqlite.patch
+Patch6:         rustc-1.97.0-unbundle-sqlite.patch
 
 # stage0 tries to copy all of /usr/lib, sometimes unsuccessfully, see #143735
 Patch7:         0001-only-copy-rustlib-into-stage0-sysroot.patch
+
+# https://fedoraproject.org/wiki/Changes/ShadowStack
+# This patch enables `-Zcf-protection=return` for SHSTK by default
+Patch8:         0001-Enable-SHSTK-by-default-on-x86_64-unknown-linux-gnu.patch
 
 ### RHEL-specific patches below ###
 
@@ -162,10 +162,10 @@ Source102:      cargo_vendor.attr
 Source103:      cargo_vendor.prov
 
 # Disable cargo->libgit2->libssh2 on RHEL, as it's not approved for FIPS (rhbz1732949)
-Patch100:       rustc-1.92.0-disable-libssh2.patch
+Patch100:       rustc-1.97.0-disable-libssh2.patch
 
 # Fix CVE-2026-53587 for libgit2. This is fixed in libgit2 1.9.5.
-Patch101:	rustc-1.92.0-libgit2-CVE-2026-53587.patch
+Patch101:	rustc-1.97.0-libgit2-CVE-2026-53587-bounds-check.patch
 
 # Get the Rust triple for any architecture and ABI.
 %{lua: function rust_triple(arch, abi)
@@ -231,15 +231,21 @@ end}
   local channel = rpm.expand("%{bootstrap_channel}")
   local target_arch = rpm.expand("%{_target_cpu}")
   for i, arch in ipairs(bootstrap_arches) do
-    i = 1000 + i * 3
+    i = 1000 + i * 6
     local suffix = channel.."-"..rust_triple(arch)
     print(string.format("Source%d: %s/cargo-%s.tar.xz\n", i, base, suffix))
-    print(string.format("Source%d: %s/rustc-%s.tar.xz\n", i+1, base, suffix))
-    print(string.format("Source%d: %s/rust-std-%s.tar.xz\n", i+2, base, suffix))
+    print(string.format("Source%d: %s/cargo-%s.tar.xz.asc\n", i+1, base, suffix))
+    print(string.format("Source%d: %s/rustc-%s.tar.xz\n", i+2, base, suffix))
+    print(string.format("Source%d: %s/rustc-%s.tar.xz.asc\n", i+3, base, suffix))
+    print(string.format("Source%d: %s/rust-std-%s.tar.xz\n", i+4, base, suffix))
+    print(string.format("Source%d: %s/rust-std-%s.tar.xz.asc\n", i+5, base, suffix))
     if arch == target_arch then
       rpm.define("bootstrap_source_cargo "..i)
-      rpm.define("bootstrap_source_rustc "..i+1)
-      rpm.define("bootstrap_source_std "..i+2)
+      rpm.define("bootstrap_sig_cargo "..i+1)
+      rpm.define("bootstrap_source_rustc "..i+2)
+      rpm.define("bootstrap_sig_rustc "..i+3)
+      rpm.define("bootstrap_source_std "..i+4)
+      rpm.define("bootstrap_sig_std "..i+5)
       rpm.define("bootstrap_suffix "..suffix)
     end
   end
@@ -255,6 +261,12 @@ BuildRequires:  (%{name} >= %{bootstrap_version} with %{name} <= %{version})
 %global local_rust_root %{_prefix}
 %endif
 
+%if 0%{?rhel} && 0%{?rhel} < 11
+BuildRequires:  gnupg2
+%else
+BuildRequires:  gpgverify
+%endif
+
 BuildRequires:  make
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
@@ -263,15 +275,15 @@ BuildRequires:  ncurses-devel
 BuildRequires:  curl-devel
 BuildRequires:  pkgconfig(libcurl)
 BuildRequires:  pkgconfig(liblzma)
-BuildRequires:  pkgconfig(openssl)
+
+# Only specific versions of openssl are supported. They are 1.0.2 - 1.1.1, or 3
+# The openssl-sys crate will also verify the release is supported.
+BuildRequires:  pkgconfig(openssl) < 4
+
 BuildRequires:  pkgconfig(zlib)
 
 %if %{without bundled_libgit2}
 BuildRequires:  (pkgconfig(libgit2) >= %{min_libgit2_version} with pkgconfig(libgit2) < %{next_libgit2_version})
-%endif
-
-%if %{without bundled_oniguruma}
-BuildRequires:  pkgconfig(oniguruma) >= %{min_oniguruma_version}
 %endif
 
 %if %{without bundled_sqlite3}
@@ -375,6 +387,7 @@ BuildRequires:  mingw64-winpthreads-static
 %if %defined wasm_targets
 %if %with bundled_wasi_libc
 BuildRequires:  clang%{?llvm_compat_version}
+BuildRequires:  cmake >= 3.26
 %else
 BuildRequires:  wasi-libc-static
 %endif
@@ -676,8 +689,12 @@ the Cargo package manager, and a few convenience macros for rpm builds.
 
 
 %prep
+%gpgverify -k 2 -s 1 -d 0
 
 %ifarch %{bootstrap_arches}
+%gpgverify -k 2 -s %{bootstrap_sig_cargo} -d %{bootstrap_source_cargo}
+%gpgverify -k 2 -s %{bootstrap_sig_rustc} -d %{bootstrap_source_rustc}
+%gpgverify -k 2 -s %{bootstrap_sig_std} -d %{bootstrap_source_std}
 rm -rf %{local_rust_root}
 %setup -q -n cargo-%{bootstrap_suffix} -T -b %{bootstrap_source_cargo}
 ./install.sh --prefix=%{local_rust_root} --disable-ldconfig
@@ -690,11 +707,17 @@ test -f '%{local_rust_root}/bin/rustc'
 %endif
 
 %if %{defined wasm_targets} && %{with bundled_wasi_libc}
-%setup -q -n %{wasi_libc_name} -T -b 1
-rm -rf %{wasi_libc_dir}/dlmalloc/
+%setup -q -n %{wasi_libc_name} -T -b 10
+# We want to make sure we use emmalloc instead of CC0 dlmalloc.
+# The cmake files need the sources to exist, so just truncate instead.
+truncate --no-create --size=0 %{wasi_libc_dir}/dlmalloc/src/*.c
 %endif
 
 %setup -q -n %{rustc_package}
+
+# Sanity check that the source version is what we expect,
+# especially for betas where the tarball is unversioned.
+test "$(cut -d' ' -f1 ./version)" = "%{lua: print((rpm.expand('%version'):gsub('~', '-'))) }"
 
 %patch -P1 -p1
 %patch -P2 -p1
@@ -707,6 +730,7 @@ rm -rf %{wasi_libc_dir}/dlmalloc/
 %patch -P6 -p1
 %endif
 %patch -P7 -p1
+%patch -P8 -p1
 
 %if %with disabled_libssh2
 %patch -P100 -p1
@@ -744,13 +768,10 @@ rm -rf src/tools/rustc-perf/collector/*-benchmarks/
 %clear_dir vendor/libz-sys*/src/zlib{,-ng}/
 %clear_dir vendor/lzma-sys*/xz-*/
 %clear_dir vendor/openssl-src*/openssl/
+%clear_dir vendor/capstone-sys-*/capstone/
 
 %if %without bundled_libgit2
 %clear_dir vendor/libgit2-sys*/libgit2/
-%endif
-
-%if %without bundled_oniguruma
-%clear_dir vendor/onig_sys*/oniguruma/
 %endif
 
 %if %without bundled_sqlite3
@@ -805,7 +826,6 @@ end}
 %global rust_env %{shrink:
   %{?rustflags:RUSTFLAGS="%{rustflags}"}
   %{rustc_target_cpus}
-  %{!?with_bundled_oniguruma:RUSTONIG_SYSTEM_LIBONIG=1}
   %{!?with_bundled_sqlite3:LIBSQLITE3_SYS_USE_PKG_CONFIG=1}
   %{!?with_disabled_libssh2:LIBSSH2_SYS_USE_PKG_CONFIG=1}
   %{?llvm_path:PATH="%{llvm_path}:$PATH"}
@@ -851,10 +871,19 @@ end}
 
 %if %defined wasm_targets
 %if %with bundled_wasi_libc
-%define wasi_libc_flags MALLOC_IMPL=emmalloc CC=clang AR=llvm-ar NM=llvm-nm
-%make_build --quiet -C %{wasi_libc_dir} %{wasi_libc_flags} TARGET_TRIPLE=wasm32-wasip1
+# Note that we don't want host CFLAGS here!
+env -u CFLAGS %__cmake \
+  -S "%{wasi_libc_dir}" \
+  -B "%{wasi_libc_dir}/%{__cmake_builddir}" \
+  -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_C_FLAGS_RELEASE="-O2 -fstack-protector" \
+  -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+  -DBUILD_SHARED=OFF \
+  -DMALLOC=emmalloc \
+  -DTARGET_TRIPLE=wasm32-wasip1
+%__cmake --build "%{wasi_libc_dir}/%{__cmake_builddir}" %{?_smp_mflags}
 %define wasm_target_config %{shrink:
-  --set target.wasm32-wasip1.wasi-root=%{wasi_libc_dir}/sysroot
+  --set target.wasm32-wasip1.wasi-root=%{wasi_libc_dir}/%{__cmake_builddir}/sysroot
 }
 %else
 %define wasm_target_config %{shrink:
@@ -869,14 +898,8 @@ end}
 %define profiler %{clang_lib}/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
 test -r "%{profiler}"
 
-# llvm < 21 does not provide a builtins library for s390x.
-%if "%{_arch}" != "s390x" || 0%{?clang_major_version} >= 21
 %define optimized_builtins %{clang_lib}/%{_arch}-redhat-linux-gnu/libclang_rt.builtins.a
 test -r "%{optimized_builtins}"
-%else
-%define optimized_builtins false
-%endif
-
 
 %configure --disable-option-checking \
   --docdir=%{_pkgdocdir} \
@@ -910,6 +933,7 @@ test -r "%{optimized_builtins}"
   --set build.optimized-compiler-builtins=false \
   --set rust.llvm-tools=false \
   --set rust.verify-llvm-ir=true \
+  --set rust.remap-debuginfo=false \
   --enable-extended \
   --tools=cargo,clippy,rust-analyzer,rustdoc,rustfmt,src \
   --enable-vendor \
@@ -1090,15 +1114,25 @@ rm -rf "./build/%{rust_triple}/test/"
 # We test this after packaging
 %global cargo_test_skip_list net_err_suggests_fetch_with_cli
 
+# Requires access to index.crates.io but neither Fedora nor CentOS/RHEL builders
+# have DNS resolution, so the test will always fail.
+%global cargo_test_skip_list %{cargo_test_skip_list} publish_to_crates_io_warns
+
+# Requires DNS resolution to github.com, this test will always fail.
+# Additionally SCP-like directions are essentially ssh which is not available in RHEL
+%global cargo_test_skip_list %{cargo_test_skip_list} dep_with_scp_like_submodule_url
+
 %ifarch aarch64
 # https://github.com/rust-lang/rust/issues/123733
 %global cargo_test_skip_list %{cargo_test_skip_list} panic_abort_doc_tests
 %endif
 %if %with disabled_libssh2
 # These tests need ssh - guaranteed to fail when libssh2 is disabled.
-%global cargo_test_skip_list  %{cargo_test_skip_list} \\\
-  net_err_suggests_fetch_with_cli \\\
+%global cargo_test_skip_list %{shrink:
+  %{cargo_test_skip_list}
+  net_err_suggests_fetch_with_cli
   ssh_something_happens
+}
 %endif
 %if "%{cargo_test_skip_list}" != ""
 %define cargo_test_skip --test-args "%(printf -- '--skip %%s ' %{cargo_test_skip_list})"
@@ -1135,16 +1169,18 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %dir %{rustlibdir}/%{rust_triple}
 %dir %{rustlibdir}/%{rust_triple}/lib
 %{rustlibdir}/%{rust_triple}/lib/*.rlib
+%{rustlibdir}/%{rust_triple}/lib/*.rmeta
 %{rustlibdir}/%{rust_triple}/lib/*.so
 %license build/manifests/std/cargo-vendor.txt
 %license %{_pkgdocdir}/COPYRIGHT-library.html
 
-%global target_files()      \
-%files std-static-%1        \
-%dir %{rustlibdir}          \
-%dir %{rustlibdir}/%1       \
-%dir %{rustlibdir}/%1/lib   \
-%{rustlibdir}/%1/lib/*.rlib \
+%global target_files()        \
+%files std-static-%1          \
+%dir %{rustlibdir}            \
+%dir %{rustlibdir}/%1         \
+%dir %{rustlibdir}/%1/lib     \
+%{rustlibdir}/%1/lib/*.rlib   \
+%{rustlibdir}/%1/lib/*.rmeta  \
 %license build/manifests/std-%1/cargo-vendor.txt
 
 %if %target_enabled i686-pc-windows-gnu
@@ -1271,8 +1307,32 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 
 %changelog
 ## START: Generated by rpmautospec
-* Thu Aug 27 2026 Paul Murphy <murp@redhat.com> - 1.92.0-2
+* Thu Aug 27 2026 Paul Murphy <murp@redhat.com> - 1.97.1-5
 - Apply libgit2 fix for CVE-2026-53587
+
+* Thu Aug 13 2026 Paul Murphy <murp@redhat.com> - 1.97.1-4
+- Disable `disable-git-dep-with-scp-submodule` cargo test
+
+* Mon Aug 10 2026 Paul Murphy <murp@redhat.com> - 1.97.1-3
+- Enable Shadow Stack by default on x86_64
+
+* Mon Jul 27 2026 Jesus Checa Hidalgo <jchecahi@redhat.com> - 1.97.1-2
+- Sync up rpminspect.yaml with rawhide
+
+* Thu Jul 23 2026 Paul Murphy <murp@redhat.com> - 1.97.1-1
+- Update to Rust 1.97.1
+
+* Thu Jun 04 2026 Josh Stone <jistone@redhat.com> - 1.96.0-1
+- Update to Rust 1.96.0
+
+* Wed Apr 22 2026 Paul Murphy <murp@redhat.com> - 1.95.0-1
+- Update to Rust 1.95.0
+
+* Tue Apr 07 2026 Josh Stone <jistone@redhat.com> - 1.94.1-1
+- Update to Rust 1.94.1
+
+* Thu Feb 26 2026 Paul Murphy <murp@redhat.com> - 1.93.0-1
+- Update to Rust 1.93.0
 
 * Wed Jan 07 2026 Josh Stone <jistone@redhat.com> - 1.92.0-1
 - Update to Rust 1.92.0
